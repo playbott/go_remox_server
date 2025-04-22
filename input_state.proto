@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package remotemouse;
+
+option go_package = "./proto;remotemouse";
+
+message InputState {
+  int32 dx = 1;
+  int32 dy = 2;
+  map<string, bool> buttons = 3;
+  int32 scroll_y = 4;
+}

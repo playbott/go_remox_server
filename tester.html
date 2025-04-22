@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remote Control Tester (JSON/Protobuf)</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 10px;
+        }
+
+        .config {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #status {
+            margin-top: 5px;
+            font-weight: bold;
+            height: 20px;
+        }
+
+        .disconnected {
+            color: red;
+        }
+
+        .connected {
+            color: green;
+        }
+
+        .pointer-locked {
+            color: blue;
+        }
+
+        #controlZone {
+            width: 300px;
+            height: 200px;
+            border: 2px solid #ccc;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            cursor: pointer;
+            margin-top: 15px;
+            user-select: none;
+            position: relative;
+        }
+
+        #controlZone.active {
+            background-color: #e0e0ff;
+            border-color: blue;
+            cursor: none;
+        }
+
+        #controlZone p {
+            margin: 5px 0;
+        }
+
+        #stateInfo {
+            font-size: smaller;
+            color: #333;
+            margin-top: 10px;
+            min-height: 3.6em;
+            white-space: pre;
+            text-align: left;
+            display: none;
+        }
+
+        .format-selector {
+            margin-bottom: 10px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs@7/dist/protobuf.min.js"></script>
+</head>
+<body>
+
+<h1>Remote Control Tester (JSON/Protobuf)</h1>
+
+<div class="config">
+    <label for="wsUrl">Server URL:</label>
+    <input type="text" id="wsUrl" value="ws://localhost:8080/ws" size="30">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+</div>
+
+<div class="format-selector">
+    <label>Message Format:</label>
+    <input type="radio" id="formatJson" name="format" value="json" checked>
+    <label for="formatJson">JSON</label>
+    <input type="radio" id="formatProtobuf" name="format" value="protobuf">
+    <label for="formatProtobuf">Protobuf</label>
+    <span id="protoLoadStatus" style="margin-left: 10px; font-style: italic; color: gray;"></span>
+</div>
+
+<div id="status" class="disconnected">Status: Disconnected</div>
+
+<h3>Control Zone</h3>
+<div id="controlZone">
+    <p id="controlZoneText">Click Here to Lock Pointer (Press Esc to Unlock)</p>
+    <p style="font-size: smaller;">(Movement, Clicks, Scroll are sent while locked)</p>
+    <div id="stateInfo">dx: 0, dy: 0
+        LMB: false, MMB: false, RMB: false
+        ScrollY: 0
+    </div>
+</div>
+
+<script>
+    const wsUrlInput = document.getElementById('wsUrl');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const statusDiv = document.getElementById('status');
+    const controlZone = document.getElementById('controlZone');
+    const controlZoneText = document.getElementById('controlZoneText');
+    const stateInfo = document.getElementById('stateInfo');
+    const formatJsonRadio = document.getElementById('formatJson');
+    const formatProtobufRadio = document.getElementById('formatProtobuf');
+    const protoLoadStatus = document.getElementById('protoLoadStatus');
+
+    let websocket = null;
+    let isPointerLocked = false;
+    let sendIntervalId = null;
+    const SEND_INTERVAL = 20; // ms
+
+    let accumulatedDx = 0;
+    let accumulatedDy = 0;
+    let accumulatedScrollY = 0;
+    let buttonStates = {left: false, middle: false, right: false};
+
+    let protobufRoot = null;
+    let InputStateMessage = null;
+
+    async function loadProtoDefinition() {
+        if (protobufRoot) return true;
+
+        protoLoadStatus.textContent = 'Loading proto...';
+        try {
+            protobufRoot = await protobuf.load("input_state.proto");
+            InputStateMessage = protobufRoot.lookupType("remotemouse.InputState");
+            protoLoadStatus.textContent = 'Proto loaded!';
+            console.log("Protobuf definition loaded successfully.");
+            formatProtobufRadio.disabled = false;
+            return true;
+        } catch (err) {
+            protoLoadStatus.textContent = 'Proto load failed!';
+            console.error("Failed to load protobuf definition:", err);
+            alert("Could not load input_state.proto. Make sure the server is running and the file is accessible.");
+            formatProtobufRadio.disabled = true;
+            formatJsonRadio.checked = true;
+            return false;
+        }
+    }
+
+    loadProtoDefinition();
+
+    function setStatus(message, statusClass = 'disconnected') {
+        statusDiv.textContent = `Status: ${message}`;
+        statusDiv.className = statusClass;
+        const isConnected = statusClass === 'connected' || statusClass === 'pointer-locked';
+        disconnectBtn.disabled = !websocket || (websocket.readyState !== WebSocket.OPEN && websocket.readyState !== WebSocket.CONNECTING);
+        connectBtn.disabled = websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING);
+    }
+
+    function updateControlZoneAppearance() {
+        if (isPointerLocked) {
+            controlZone.classList.add('active');
+            setStatus("Connected (Pointer Locked)", 'pointer-locked');
+            controlZoneText.textContent = "Pointer Locked (Press Esc to Unlock)";
+            stateInfo.style.display = 'block';
+        } else {
+            controlZone.classList.remove('active');
+            stateInfo.textContent = `dx: 0, dy: 0\nLMB: false, MMB: false, RMB: false\nScrollY: 0`;
+            stateInfo.style.display = 'none';
+            controlZoneText.textContent = "Click Here to Lock Pointer";
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                setStatus("Connected", 'connected');
+            } else {
+                setStatus("Disconnected", 'disconnected');
+            }
+        }
+    }
+
+    function connect() {
+        const url = wsUrlInput.value;
+        if (!url) {
+            alert("WebSocket URL cannot be empty!");
+            return;
+        }
+
+        if (formatProtobufRadio.checked && !InputStateMessage) {
+            alert("Protobuf definition not loaded yet or failed to load. Cannot connect with Protobuf format.");
+            return;
+        }
+
+        setStatus("Connecting...");
+        websocket = new WebSocket(url);
+        websocket.binaryType = "arraybuffer";
+
+        websocket.onopen = () => {
+            setStatus("Connected", 'connected');
+            controlZone.addEventListener('click', handleControlZoneClick);
+            updateControlZoneAppearance();
+        };
+
+        websocket.onclose = (event) => {
+            const reason = event.reason ? ` (${event.reason})` : '';
+            setStatus(`Disconnected (Code: ${event.code}${reason})`, 'disconnected');
+            controlZone.removeEventListener('click', handleControlZoneClick);
+            stopSendLoop();
+            if (isPointerLocked && document.pointerLockElement === controlZone) {
+                document.exitPointerLock();
+            }
+            isPointerLocked = false;
+            updateControlZoneAppearance();
+            websocket = null;
+        };
+
+        websocket.onerror = (error) => {
+            setStatus("Connection Error", 'disconnected');
+            controlZone.removeEventListener('click', handleControlZoneClick);
+            stopSendLoop();
+            if (isPointerLocked && document.pointerLockElement === controlZone) {
+                document.exitPointerLock();
+            }
+            isPointerLocked = false;
+            updateControlZoneAppearance();
+            console.error("WebSocket Error:", error);
+            websocket = null;
+        };
+
+        websocket.onmessage = (event) => {
+            if (event.data instanceof ArrayBuffer) {
+                console.log("Received binary message from server:", event.data);
+                // TODO: Add protobuf decoding logic if server sends binary replies
+            } else {
+                console.log("Received text message from server:", event.data);
+            }
+        };
+    }
+
+    function disconnect() {
+        if (websocket) {
+            setStatus("Disconnecting...");
+            stopSendLoop();
+            websocket.close(1000, "User disconnected");
+        }
+    }
+
+    function sendMessage(data) {
+        if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+            console.warn("WebSocket not connected or not open.");
+            stopSendLoop();
+            return;
+        }
+        const format = formatProtobufRadio.checked ? 'protobuf' : 'json';
+        try {
+            if (format === 'protobuf') {
+                if (!InputStateMessage) {
+                    console.error("Protobuf message type not available!");
+                    return;
+                }
+                const verificationError = InputStateMessage.verify(data);
+                if (verificationError) {
+                    console.warn("Protobuf verification warning:", verificationError, "Payload:", data);
+                }
+                const message = InputStateMessage.create(data);
+                const buffer = InputStateMessage.encode(message).finish();
+                websocket.send(buffer);
+            } else {
+                const msg = JSON.stringify(data);
+                websocket.send(msg);
+            }
+        } catch (error) {
+            console.error(`Error sending ${format} message:`, error);
+            setStatus(`Error sending data (${format})`, 'disconnected');
+            disconnect();
+        }
+    }
+
+    function handleLockedMouseMove(event) {
+        accumulatedDx += event.movementX || 0;
+        accumulatedDy += event.movementY || 0;
+    }
+
+    function handleLockedMouseDown(event) {
+        updateButtonState(event.button, true);
+        event.preventDefault();
+    }
+
+    function handleLockedMouseUp(event) {
+        updateButtonState(event.button, false);
+        event.preventDefault();
+    }
+
+    function handleLockedWheel(event) {
+        let delta = event.deltaY;
+        if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+            delta *= 16;
+        } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+            delta *= 400;
+        }
+        accumulatedScrollY += Math.round(delta);
+        event.preventDefault();
+    }
+
+    function updateButtonState(buttonCode, isPressed) {
+        switch (buttonCode) {
+            case 0:
+                buttonStates.left = isPressed;
+                break;
+            case 1:
+                buttonStates.middle = isPressed;
+                break;
+            case 2:
+                buttonStates.right = isPressed;
+                break;
+            default:
+                return;
+        }
+    }
+
+    function preventContextMenu(event) {
+        if (isPointerLocked) {
+            event.preventDefault();
+        }
+    }
+
+    function handleControlZoneClick(event) {
+        if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+            alert("Not connected to WebSocket server.");
+            return;
+        }
+        if (!isPointerLocked && document.pointerLockElement !== controlZone) {
+            controlZone.requestPointerLock()
+                .catch(err => {
+                    console.error('Cannot lock pointer:', err);
+                    setStatus("Pointer lock failed", "disconnected");
+                });
+        }
+    }
+
+    function handlePointerLockChange() {
+        if (document.pointerLockElement === controlZone) {
+            console.log('Pointer locked to controlZone');
+            isPointerLocked = true;
+            accumulatedDx = 0;
+            accumulatedDy = 0;
+            accumulatedScrollY = 0;
+            document.addEventListener('mousemove', handleLockedMouseMove, false);
+            document.addEventListener('mousedown', handleLockedMouseDown, false);
+            document.addEventListener('mouseup', handleLockedMouseUp, false);
+            document.addEventListener('wheel', handleLockedWheel, {passive: false});
+            document.addEventListener('contextmenu', preventContextMenu, false);
+            startSendLoop();
+        } else {
+            console.log('Pointer unlocked');
+            if (isPointerLocked) {
+                isPointerLocked = false;
+                document.removeEventListener('mousemove', handleLockedMouseMove, false);
+                document.removeEventListener('mousedown', handleLockedMouseDown, false);
+                document.removeEventListener('mouseup', handleLockedMouseUp, false);
+                document.removeEventListener('wheel', handleLockedWheel, false);
+                document.removeEventListener('contextmenu', preventContextMenu, false);
+                stopSendLoop();
+                buttonStates = {left: false, middle: false, right: false};
+            }
+        }
+        updateControlZoneAppearance();
+    }
+
+    function handlePointerLockError(event) {
+        console.error('Pointer lock error:', event);
+        setStatus("Pointer Lock Error", "disconnected");
+        if (isPointerLocked) {
+            isPointerLocked = false;
+            document.removeEventListener('mousemove', handleLockedMouseMove, false);
+            document.removeEventListener('mousedown', handleLockedMouseDown, false);
+            document.removeEventListener('mouseup', handleLockedMouseUp, false);
+            document.removeEventListener('wheel', handleLockedWheel, false);
+            document.removeEventListener('contextmenu', preventContextMenu, false);
+            stopSendLoop();
+        }
+        updateControlZoneAppearance();
+    }
+
+    function sendStateLoop() {
+        if (!isPointerLocked || !websocket || websocket.readyState !== WebSocket.OPEN) {
+            stopSendLoop();
+            return;
+        }
+
+        const statePayload = {
+            dx: accumulatedDx,
+            dy: accumulatedDy,
+            buttons: {
+                left: buttonStates.left,
+                middle: buttonStates.middle,
+                right: buttonStates.right,
+            },
+
+            scrollY: accumulatedScrollY
+        };
+
+        sendMessage(statePayload);
+
+        stateInfo.textContent = `dx: ${statePayload.dx}, dy: ${statePayload.dy}\nLMB: ${statePayload.buttons.left}, MMB: ${statePayload.buttons.middle}, RMB: ${statePayload.buttons.right}\nScrollY: ${statePayload.scrollY}`;
+
+        accumulatedDx = 0;
+        accumulatedDy = 0;
+        accumulatedScrollY = 0;
+    }
+
+    function startSendLoop() {
+        if (sendIntervalId === null) {
+            console.log(`Starting send loop (${SEND_INTERVAL}ms)`);
+            sendStateLoop();
+            sendIntervalId = setInterval(sendStateLoop, SEND_INTERVAL);
+        }
+    }
+
+    function stopSendLoop() {
+        if (sendIntervalId !== null) {
+            console.log("Stopping send loop");
+            clearInterval(sendIntervalId);
+            sendIntervalId = null;
+        }
+    }
+
+
+    document.addEventListener('pointerlockchange', handlePointerLockChange, false);
+    document.addEventListener('webkitpointerlockchange', handlePointerLockChange, false);
+    document.addEventListener('pointerlockerror', handlePointerLockError, false);
+    document.addEventListener('mozpointerlockerror', handlePointerLockError, false);
+    document.addEventListener('webkitpointerlockerror', handlePointerLockError, false);
+
+    connectBtn.onclick = connect;
+    disconnectBtn.onclick = disconnect;
+
+    formatJsonRadio.onchange = () => {
+        if (websocket) disconnect();
+    };
+    formatProtobufRadio.onchange = async () => {
+        if (!protobufRoot) {
+            const loaded = await loadProtoDefinition();
+            if (!loaded) return;
+        }
+        if (websocket) disconnect();
+    };
+
+    updateControlZoneAppearance();
+    setStatus("Disconnected");
+
+</script>
+
+</body>
+</html>
