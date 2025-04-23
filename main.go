@@ -53,7 +53,7 @@ func main() {
 		log.Println("Using JSON Input State Parser (Default)")
 	}
 
-	accelConfig := server.DefaultAccelerationConfig()
+	accelConfig := configs.DefaultAccelerationConfig()
 
 	log.Println("--- Acceleration & Scroll Config ---")
 	log.Printf(" Velocity Sensitivity : %.4f", accelConfig.VelocitySensitivity)

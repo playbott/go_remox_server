@@ -1,4 +1,4 @@
-package server
+package configs
 
 import "time"
 
@@ -34,4 +34,4 @@ func DefaultAccelerationConfig() AccelerationConfig {
 	}
 }
 
-const platformWheelDelta = 120
+const PlatformWheelDelta = 120

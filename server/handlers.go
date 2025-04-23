@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"math"
+	"remox/configs"
 	"remox/platform"
 	"time"
 )
@@ -10,7 +11,7 @@ import (
 func handleMoveCommand(
 	controller platform.InputController,
 	dx, dy int,
-	config AccelerationConfig,
+	config configs.AccelerationConfig,
 	moveState *clientMoveState,
 	deltaTime time.Duration,
 ) {
@@ -168,7 +169,7 @@ func handleScroll(
 	controller platform.InputController,
 	deltaY int,
 	state *clientState,
-	config AccelerationConfig,
+	config configs.AccelerationConfig,
 ) {
 
 	if deltaY == 0 && math.Abs(state.accumulatedScroll) < 1.0 {
@@ -180,7 +181,7 @@ func handleScroll(
 		sensitivity = 0.01
 	}
 
-	threshold := float64(platformWheelDelta) / sensitivity
+	threshold := float64(configs.PlatformWheelDelta) / sensitivity
 
 	state.accumulatedScroll += float64(deltaY)
 
@@ -190,9 +191,9 @@ func handleScroll(
 
 		var amountPerTick int
 		if numTicks > 0 {
-			amountPerTick = -platformWheelDelta
+			amountPerTick = -configs.PlatformWheelDelta
 		} else if numTicks < 0 {
-			amountPerTick = platformWheelDelta
+			amountPerTick = configs.PlatformWheelDelta
 		} else {
 			return
 		}

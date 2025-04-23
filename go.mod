@@ -6,7 +6,6 @@ require (
 	github.com/gonutz/input v1.1.0
 	github.com/gonutz/w32/v2 v2.12.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/joho/godotenv v1.5.1
 	github.com/json-iterator/go v1.1.12
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1

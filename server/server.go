@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"remox/configs"
 	"remox/platform"
 	"time"
 
@@ -18,7 +19,7 @@ type WebSocketServer struct {
 	upgrader    websocket.Upgrader
 	controller  platform.InputController
 	parser      MessageParseFunc
-	accelConfig AccelerationConfig
+	accelConfig configs.AccelerationConfig
 	parserType  string
 }
 
@@ -37,7 +38,7 @@ type clientMoveState struct {
 	lastMoveTime       time.Time
 }
 
-func NewWebSocketServer(controller platform.InputController, parser MessageParseFunc, accelConfig AccelerationConfig, parserType string) *WebSocketServer {
+func NewWebSocketServer(controller platform.InputController, parser MessageParseFunc, accelConfig configs.AccelerationConfig, parserType string) *WebSocketServer {
 	if parser == nil {
 		log.Fatal("WebSocketServer requires a non-nil message parser")
 	}
