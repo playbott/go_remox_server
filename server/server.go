@@ -24,9 +24,8 @@ type WebSocketServer struct {
 }
 
 type clientState struct {
-	moveState         clientMoveState
-	lastButtonState   ButtonStateMap
-	accumulatedScroll float64
+	moveState       clientMoveState
+	lastButtonState ButtonStateMap
 }
 
 type clientMoveState struct {
@@ -84,8 +83,7 @@ func (s *WebSocketServer) HandleConnections(w http.ResponseWriter, r *http.Reque
 		moveState: clientMoveState{
 			lastMoveTime: time.Now(),
 		},
-		lastButtonState:   make(ButtonStateMap),
-		accumulatedScroll: 0.0,
+		lastButtonState: make(ButtonStateMap),
 	}
 
 	for {
@@ -112,12 +110,15 @@ func (s *WebSocketServer) HandleConnections(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 
+			log.Printf("Received command: Type=%s, Dx=%d, Dy=%d, Buttons=%v, ScrollY=%d",
+				cmd.Type, cmd.Data.Dx, cmd.Data.Dy, cmd.Data.Buttons, cmd.Data.ScrollY)
+
 			if cmd.Type == InputStateCommand {
 				deltaTime := currentTime.Sub(state.moveState.lastMoveTime)
 				handleMoveCommand(s.controller, cmd.Data.Dx, cmd.Data.Dy, s.accelConfig, &state.moveState, deltaTime)
 				state.moveState.lastMoveTime = currentTime
 				handleButtonState(s.controller, cmd.Data.Buttons, state.lastButtonState)
-				handleScroll(s.controller, cmd.Data.ScrollY, &state, s.accelConfig)
+				handleScroll(s.controller, cmd.Data.ScrollX, cmd.Data.ScrollY)
 			} else {
 				log.Printf("Received unexpected command type: %s", cmd.Type)
 			}

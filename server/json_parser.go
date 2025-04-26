@@ -11,6 +11,7 @@ type wsJsonInputState struct {
 	Dx      int            `json:"dx"`
 	Dy      int            `json:"dy"`
 	Buttons ButtonStateMap `json:"buttons"`
+	ScrollX int            `json:"scroll_x"`
 	ScrollY int            `json:"scroll_y"`
 }
 
@@ -27,6 +28,7 @@ func ParseJsonInputState(message []byte) (Command, error) {
 			Dx:      jsonState.Dx,
 			Dy:      jsonState.Dy,
 			Buttons: jsonState.Buttons,
+			ScrollX: jsonState.ScrollX,
 			ScrollY: jsonState.ScrollY,
 		},
 	}

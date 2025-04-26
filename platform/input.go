@@ -5,7 +5,7 @@ type InputController interface {
 
 	SetButtonState(button string, pressed bool) error
 
-	Scroll(deltaY int) error
+	ScrollBy(dx, dy int) error
 
 	Close() error
 }

@@ -1,20 +1,22 @@
+//go:build windows
+
 package platform
 
 import (
 	"fmt"
+	"github.com/gonutz/w32/v2"
 	"log"
 	"sync"
 	"syscall"
 
 	"github.com/gonutz/input"
-	"github.com/gonutz/w32/v2"
 )
 
 var (
 	user32Dll        = syscall.NewLazyDLL("user32.dll")
 	procMouseEvent   = user32Dll.NewProc("mouse_event")
 	mouseEventFWheel = 0x0800
-	wheelDelta       = 120
+	wheelDelta       = 30
 )
 
 var _ InputController = (*windowsInputController)(nil)
@@ -76,16 +78,11 @@ func (wic *windowsInputController) SetButtonState(button string, pressed bool) e
 	return nil
 }
 
-func (wic *windowsInputController) Scroll(deltaY int) error {
+func (wic *windowsInputController) ScrollBy(deltaX int, deltaY int) error {
 	if deltaY == 0 {
 		return nil
 	}
-	var scrollAmount int
-	if deltaY < 0 {
-		scrollAmount = wheelDelta
-	} else {
-		scrollAmount = -wheelDelta
-	}
+	scrollAmount := int32(-deltaY * wheelDelta)
 	_, _, lastErr := procMouseEvent.Call(uintptr(mouseEventFWheel), 0, 0, uintptr(scrollAmount), 0)
 	if lastErr != nil && lastErr.Error() != "The operation completed successfully." {
 		log.Printf("Error calling mouse_event for scroll: %v", lastErr)

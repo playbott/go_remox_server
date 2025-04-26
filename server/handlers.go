@@ -167,55 +167,15 @@ func handleButtonState(
 
 func handleScroll(
 	controller platform.InputController,
+	deltaX int,
 	deltaY int,
-	state *clientState,
-	config configs.AccelerationConfig,
 ) {
-
-	if deltaY == 0 && math.Abs(state.accumulatedScroll) < 1.0 {
+	if deltaX == 0 && deltaY == 0 {
 		return
 	}
 
-	sensitivity := config.ScrollSensitivity
-	if sensitivity <= 0.01 {
-		sensitivity = 0.01
+	err := controller.ScrollBy(deltaX, deltaY)
+	if err != nil {
+		log.Printf("Error executing ScrollBy(%d, %d): %v", deltaX, deltaY, err)
 	}
-
-	threshold := float64(configs.PlatformWheelDelta) / sensitivity
-
-	state.accumulatedScroll += float64(deltaY)
-
-	if math.Abs(state.accumulatedScroll) >= threshold {
-
-		numTicks := int(state.accumulatedScroll / threshold)
-
-		var amountPerTick int
-		if numTicks > 0 {
-			amountPerTick = -configs.PlatformWheelDelta
-		} else if numTicks < 0 {
-			amountPerTick = configs.PlatformWheelDelta
-		} else {
-			return
-		}
-
-		successTicks := 0
-		for i := 0; i < int(math.Abs(float64(numTicks))); i++ {
-			err := controller.Scroll(amountPerTick)
-			if err != nil {
-				log.Printf("Error executing scroll tick %d/%d: %v", i+1, int(math.Abs(float64(numTicks))), err)
-				break
-			}
-			successTicks++
-		}
-
-		if successTicks > 0 {
-			accumSign := 1.0
-			if state.accumulatedScroll < 0 {
-				accumSign = -1.0
-			}
-			processedAmount := accumSign * float64(successTicks) * threshold
-			state.accumulatedScroll -= processedAmount
-		}
-	}
-
 }

@@ -14,6 +14,7 @@ type CommandData struct {
 	Dx      int
 	Dy      int
 	Buttons ButtonStateMap
+	ScrollX int
 	ScrollY int
 }
 

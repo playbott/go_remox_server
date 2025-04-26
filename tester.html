@@ -5,78 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remote Control Tester (JSON/Protobuf)</title>
     <style>
-        body {
-            font-family: sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 10px;
-        }
-
-        .config {
-            margin-bottom: 15px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        #status {
-            margin-top: 5px;
-            font-weight: bold;
-            height: 20px;
-        }
-
-        .disconnected {
-            color: red;
-        }
-
-        .connected {
-            color: green;
-        }
-
-        .pointer-locked {
-            color: blue;
-        }
-
-        #controlZone {
-            width: 300px;
-            height: 200px;
-            border: 2px solid #ccc;
-            background-color: #f0f0f0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            cursor: pointer;
-            margin-top: 15px;
-            user-select: none;
-            position: relative;
-        }
-
-        #controlZone.active {
-            background-color: #e0e0ff;
-            border-color: blue;
-            cursor: none;
-        }
-
-        #controlZone p {
-            margin: 5px 0;
-        }
-
-        #stateInfo {
-            font-size: smaller;
-            color: #333;
-            margin-top: 10px;
-            min-height: 3.6em;
-            white-space: pre;
-            text-align: left;
-            display: none;
-        }
-
-        .format-selector {
-            margin-bottom: 10px;
-        }
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 10px; }
+        .config { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+        #status { margin-top: 5px; font-weight: bold; height: 20px; }
+        .disconnected { color: red; }
+        .connected { color: green; }
+        .pointer-locked { color: blue; }
+        #controlZone { width: 300px; height: 200px; border: 2px solid #ccc; background-color: #f0f0f0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; cursor: pointer; margin-top: 15px; user-select: none; position: relative; }
+        #controlZone.active { background-color: #e0e0ff; border-color: blue; cursor: none; }
+        #controlZone p { margin: 5px 0; }
+        #stateInfo { font-size: smaller; color: #333; margin-top: 10px; min-height: 3.6em; white-space: pre; text-align: left; display: none; }
+        .format-selector { margin-bottom: 10px; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/protobufjs@7/dist/protobuf.min.js"></script>
 </head>
@@ -106,10 +45,7 @@
 <div id="controlZone">
     <p id="controlZoneText">Click Here to Lock Pointer (Press Esc to Unlock)</p>
     <p style="font-size: smaller;">(Movement, Clicks, Scroll are sent while locked)</p>
-    <div id="stateInfo">dx: 0, dy: 0
-        LMB: false, MMB: false, RMB: false
-        ScrollY: 0
-    </div>
+    <div id="stateInfo">Last sent: </div>
 </div>
 
 <script>
@@ -126,20 +62,14 @@
 
     let websocket = null;
     let isPointerLocked = false;
-    let sendIntervalId = null;
-    const SEND_INTERVAL = 20; // ms
-
-    let accumulatedDx = 0;
-    let accumulatedDy = 0;
-    let accumulatedScrollY = 0;
     let buttonStates = {left: false, middle: false, right: false};
+    let lastSentState = null;
 
     let protobufRoot = null;
     let InputStateMessage = null;
 
     async function loadProtoDefinition() {
         if (protobufRoot) return true;
-
         protoLoadStatus.textContent = 'Loading proto...';
         try {
             protobufRoot = await protobuf.load("input_state.proto");
@@ -174,9 +104,13 @@
             setStatus("Connected (Pointer Locked)", 'pointer-locked');
             controlZoneText.textContent = "Pointer Locked (Press Esc to Unlock)";
             stateInfo.style.display = 'block';
+            if (lastSentState) {
+                updateStateInfoDisplay(lastSentState);
+            } else {
+                stateInfo.textContent = "Last sent: (no data yet)";
+            }
         } else {
             controlZone.classList.remove('active');
-            stateInfo.textContent = `dx: 0, dy: 0\nLMB: false, MMB: false, RMB: false\nScrollY: 0`;
             stateInfo.style.display = 'none';
             controlZoneText.textContent = "Click Here to Lock Pointer";
             if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -213,7 +147,6 @@
             const reason = event.reason ? ` (${event.reason})` : '';
             setStatus(`Disconnected (Code: ${event.code}${reason})`, 'disconnected');
             controlZone.removeEventListener('click', handleControlZoneClick);
-            stopSendLoop();
             if (isPointerLocked && document.pointerLockElement === controlZone) {
                 document.exitPointerLock();
             }
@@ -225,7 +158,6 @@
         websocket.onerror = (error) => {
             setStatus("Connection Error", 'disconnected');
             controlZone.removeEventListener('click', handleControlZoneClick);
-            stopSendLoop();
             if (isPointerLocked && document.pointerLockElement === controlZone) {
                 document.exitPointerLock();
             }
@@ -238,7 +170,6 @@
         websocket.onmessage = (event) => {
             if (event.data instanceof ArrayBuffer) {
                 console.log("Received binary message from server:", event.data);
-                // TODO: Add protobuf decoding logic if server sends binary replies
             } else {
                 console.log("Received text message from server:", event.data);
             }
@@ -248,15 +179,16 @@
     function disconnect() {
         if (websocket) {
             setStatus("Disconnecting...");
-            stopSendLoop();
             websocket.close(1000, "User disconnected");
+        }
+        if (isPointerLocked && document.pointerLockElement === controlZone) {
+            document.exitPointerLock();
         }
     }
 
     function sendMessage(data) {
         if (!websocket || websocket.readyState !== WebSocket.OPEN) {
             console.warn("WebSocket not connected or not open.");
-            stopSendLoop();
             return;
         }
         const format = formatProtobufRadio.checked ? 'protobuf' : 'json';
@@ -277,6 +209,8 @@
                 const msg = JSON.stringify(data);
                 websocket.send(msg);
             }
+            lastSentState = data;
+            updateStateInfoDisplay(data);
         } catch (error) {
             console.error(`Error sending ${format} message:`, error);
             setStatus(`Error sending data (${format})`, 'disconnected');
@@ -284,46 +218,92 @@
         }
     }
 
+    function updateStateInfoDisplay(state) {
+        stateInfo.textContent = `Last Sent:\ndx: ${state.dx}, dy: ${state.dy}\nLMB: ${state.buttons.left}, MMB: ${state.buttons.middle}, RMB: ${state.buttons.right}\nScrollY: ${state.scrollY}`;
+    }
+
     function handleLockedMouseMove(event) {
-        accumulatedDx += event.movementX || 0;
-        accumulatedDy += event.movementY || 0;
+        const dx = event.movementX || 0;
+        const dy = event.movementY || 0;
+
+        if (dx !== 0 || dy !== 0) {
+            const statePayload = {
+                dx: dx,
+                dy: dy,
+                buttons: { ...buttonStates },
+                scrollY: 0
+            };
+            sendMessage(statePayload);
+        }
     }
 
     function handleLockedMouseDown(event) {
-        updateButtonState(event.button, true);
         event.preventDefault();
+        const buttonCode = event.button;
+        if (updateButtonState(buttonCode, true)) {
+            const statePayload = {
+                dx: 0,
+                dy: 0,
+                buttons: { ...buttonStates },
+                scrollY: 0
+            };
+            sendMessage(statePayload);
+        }
     }
 
     function handleLockedMouseUp(event) {
-        updateButtonState(event.button, false);
         event.preventDefault();
+        const buttonCode = event.button;
+        if (updateButtonState(buttonCode, false)) {
+            const statePayload = {
+                dx: 0,
+                dy: 0,
+                buttons: { ...buttonStates },
+                scrollY: 0
+            };
+            sendMessage(statePayload);
+        }
     }
 
     function handleLockedWheel(event) {
-        let delta = event.deltaY;
-        if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-            delta *= 16;
-        } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-            delta *= 400;
-        }
-        accumulatedScrollY += Math.round(delta);
         event.preventDefault();
+        let delta = event.deltaY;
+        const normalizedDelta = Math.max(-1, Math.min(1, delta)) || (delta > 0 ? 1 : delta < 0 ? -1 : 0);
+
+        if (normalizedDelta !== 0) {
+            const statePayload = {
+                dx: 0,
+                dy: 0,
+                buttons: { ...buttonStates },
+                scrollY: normalizedDelta
+            };
+            sendMessage(statePayload);
+        }
     }
 
     function updateButtonState(buttonCode, isPressed) {
+        let stateChanged = false;
         switch (buttonCode) {
             case 0:
-                buttonStates.left = isPressed;
+                if (buttonStates.left !== isPressed) {
+                    buttonStates.left = isPressed;
+                    stateChanged = true;
+                }
                 break;
             case 1:
-                buttonStates.middle = isPressed;
+                if (buttonStates.middle !== isPressed) {
+                    buttonStates.middle = isPressed;
+                    stateChanged = true;
+                }
                 break;
             case 2:
-                buttonStates.right = isPressed;
+                if (buttonStates.right !== isPressed) {
+                    buttonStates.right = isPressed;
+                    stateChanged = true;
+                }
                 break;
-            default:
-                return;
         }
+        return stateChanged;
     }
 
     function preventContextMenu(event) {
@@ -350,15 +330,15 @@
         if (document.pointerLockElement === controlZone) {
             console.log('Pointer locked to controlZone');
             isPointerLocked = true;
-            accumulatedDx = 0;
-            accumulatedDy = 0;
-            accumulatedScrollY = 0;
+            lastSentState = null;
+            buttonStates = {left: false, middle: false, right: false};
+
             document.addEventListener('mousemove', handleLockedMouseMove, false);
             document.addEventListener('mousedown', handleLockedMouseDown, false);
             document.addEventListener('mouseup', handleLockedMouseUp, false);
             document.addEventListener('wheel', handleLockedWheel, {passive: false});
             document.addEventListener('contextmenu', preventContextMenu, false);
-            startSendLoop();
+
         } else {
             console.log('Pointer unlocked');
             if (isPointerLocked) {
@@ -368,7 +348,6 @@
                 document.removeEventListener('mouseup', handleLockedMouseUp, false);
                 document.removeEventListener('wheel', handleLockedWheel, false);
                 document.removeEventListener('contextmenu', preventContextMenu, false);
-                stopSendLoop();
                 buttonStates = {left: false, middle: false, right: false};
             }
         }
@@ -385,56 +364,13 @@
             document.removeEventListener('mouseup', handleLockedMouseUp, false);
             document.removeEventListener('wheel', handleLockedWheel, false);
             document.removeEventListener('contextmenu', preventContextMenu, false);
-            stopSendLoop();
+            buttonStates = {left: false, middle: false, right: false};
         }
         updateControlZoneAppearance();
     }
 
-    function sendStateLoop() {
-        if (!isPointerLocked || !websocket || websocket.readyState !== WebSocket.OPEN) {
-            stopSendLoop();
-            return;
-        }
-
-        const statePayload = {
-            dx: accumulatedDx,
-            dy: accumulatedDy,
-            buttons: {
-                left: buttonStates.left,
-                middle: buttonStates.middle,
-                right: buttonStates.right,
-            },
-
-            scrollY: accumulatedScrollY
-        };
-
-        sendMessage(statePayload);
-
-        stateInfo.textContent = `dx: ${statePayload.dx}, dy: ${statePayload.dy}\nLMB: ${statePayload.buttons.left}, MMB: ${statePayload.buttons.middle}, RMB: ${statePayload.buttons.right}\nScrollY: ${statePayload.scrollY}`;
-
-        accumulatedDx = 0;
-        accumulatedDy = 0;
-        accumulatedScrollY = 0;
-    }
-
-    function startSendLoop() {
-        if (sendIntervalId === null) {
-            console.log(`Starting send loop (${SEND_INTERVAL}ms)`);
-            sendStateLoop();
-            sendIntervalId = setInterval(sendStateLoop, SEND_INTERVAL);
-        }
-    }
-
-    function stopSendLoop() {
-        if (sendIntervalId !== null) {
-            console.log("Stopping send loop");
-            clearInterval(sendIntervalId);
-            sendIntervalId = null;
-        }
-    }
-
-
     document.addEventListener('pointerlockchange', handlePointerLockChange, false);
+    document.addEventListener('mozpointerlockchange', handlePointerLockChange, false);
     document.addEventListener('webkitpointerlockchange', handlePointerLockChange, false);
     document.addEventListener('pointerlockerror', handlePointerLockError, false);
     document.addEventListener('mozpointerlockerror', handlePointerLockError, false);

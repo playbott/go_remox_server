@@ -10,6 +10,7 @@ import (
 	"remox/configs"
 	"remox/platform"
 	"remox/server"
+	"runtime"
 	"time"
 )
 
@@ -35,8 +36,12 @@ func main() {
 
 	log.Println("Starting Mouse Control Server (Tunable AccumScroll)...")
 
-	inputController := platform.NewWindowsInputController()
-	log.Println("Using Windows Input Controller")
+	log.Printf("Initializing platform input controller for OS: %s", runtime.GOOS)
+	inputController := platform.NewInputController()
+	if inputController == nil {
+		log.Fatalf("Failed to initialize input controller. Is the OS supported?")
+	}
+	log.Println("Input controller initialized successfully.")
 
 	var messageParser server.MessageParseFunc
 	var selectedParserType string
