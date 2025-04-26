@@ -13,11 +13,11 @@ It allows remote control of the mouse, keyboard and multimedia functions via net
 
 ## 🛠️ Platform Support
 
-| Platform | Mouse Support  | Keyboard Support | Media Control Support |
-|----------|----------------|------------------|-----------------------|
-| Windows  | ✅ Supported    | 🚧 In Progress   | ❓ Planned             |
-| macOS    | 🚧 In Progress | 🚧 In Progress   | ❓ Planned             |
-| Linux    | ❓ Planned      | ❓ Planned        | ❓ Planned             |
+| Platform | Mouse Support | Keyboard Support | Media Control Support |
+|----------|---------------|------------------|-----------------------|
+| Windows  | ✅ Supported   | 🚧 In Progress   | ❓ Planned             |
+| macOS    | ✅ Supported   | 🚧 In Progress   | ❓ Planned             |
+| Linux    | ❓ Planned     | ❓ Planned        | ❓ Planned             |
 
 ## 🚀 Getting Started
 
